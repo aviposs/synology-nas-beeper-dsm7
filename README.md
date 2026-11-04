@@ -87,31 +87,43 @@ So, edit the upsd.users file and add a new user with privileges to enable/disabl
     [<upsd_username>]
         password = <upsd_pwd>
         actions = SET
-        instcmds = beeper.toggle ups.beeper.status
+        instcmds = beeper.enable beeper.disable beeper.toggle ups.beeper.status
 ```
 
 ### 4. Restart the upsd service
+On DSM 6 and earlier:
 ```shell
-sudo synosystemctl restart ups-usb
+synoservice --restart ups-usb
 (wait a few seconds)
 ```
 
-### 5. Create a python script to issue commands
-Clone the repository, move the `ups_beeper_control.sh` and `upscmd.py` files to your user's home folder,
-Open `upscmd.py` with vim to configure the username(`user`) and password(`pwd`) in lines 5 and 6:
+On DSM 7 and later:
 ```shell
-vim upscmd.py
+sudo synosystemctl restart ups-usb
 ```
-Move this file and `ups_beeper_control.sh` to the right place, e.g.:
-```shell
-sudo mv ups_beeper_control.sh upscmd.py /root/
-```
-**Note**: `ups_beeper_control.sh` is used to call the `upscmd.py` script with "beeper.toggle", you could just execute `sudo python3 /root/upscmd.py beeper.toggle`.
 
-### 6. Make the scripts executable
+### 5. Create a python script to issue commands
 ```shell
-sudo chmod u+x /root/ups_beeper_control.sh
-sudo chmod u+x /root/upscmd.py
+sudo vim /root/upscmd.py
+```
+
+Use the [upscmd.py](upscmd.py) file from this repository and configure `user` and `pwd`. It supports both Python 2 and Python 3. Ensure `python` is available on DSM 6 and earlier, or `python3` on DSM 7 and later.
+
+**Note**: You can just clone the repo to a folder in your NAS, edit the file to set the user/pwd and then copy this and the following `ups_beeper_control.sh` to the right place, e.g.:
+```shell
+sudo cp /volume<N>/<path_to_your_file>/upscmd.py /root/
+```
+
+### 6. Create a bash script to call the script
+Could be skipped or done in a single script. It is used to call the `upscmd.py` script with "beeper.enable" or "beeper.disable" depending on the time of the day since I want to re-set it not only on specific times (via cron) but also when the NAS boots.
+See [ups_beeper_control.sh](ups_beeper_control.sh).
+
+The script reads `majorversion` from `/etc.defaults/VERSION` (you can inspect it with `cat /etc.defaults/VERSION`). On DSM 6 and earlier it uses `beeper.enable` / `beeper.disable`. On DSM 7 and later it uses `beeper.toggle` only when `ups.beeper.status` differs from the requested state. An unknown state causes an error instead of toggling blindly. Your UPS driver must support the corresponding commands.
+
+### 7. Make the scripts executable
+```shell
+sudo chmod u+x upscmd.py
+sudo chmod u+x ups_beeper_control.sh
 ```
 
 At this point you can test the scripts:
@@ -141,16 +153,13 @@ Waiting 5 seconds for UPS to update state...
 Beeper enabled.
 ```
 
-### 7. Schedule it
+### 8. Schedule it
 Go to the DSM Web interface (Control panel -> Task scheduler) and add the 3 tasks:
 1. Scheduled task to enable beeper (daily)
     - user: root
     - shedule: daily at 9am
     - command: `bash /root/ups_beeper_control.sh enable`
     - send email when the script terminates abnormally
-2. Triggered task to disable beeper on boot (similar to above)
-    - user: root
-    - command: `bash /root/ups_beeper_control.sh disable`
+2. Scheduled task to disable beeper (similar to above)
 3. Triggered task to enable / disable on boot based on the current time
     - command: `bash /root/ups_beeper_control.sh curtime`
-4. Etcetera...
