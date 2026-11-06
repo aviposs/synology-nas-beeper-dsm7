@@ -5,7 +5,30 @@ Based on [this post](https://moshib.in/2019/02/08/disable-ups-beeper-synology.ht
 
 Some time ago the power went off at 4am for a long time and I had to get up and shutdown the UPS in order to stop the beeping. The abovementioned post describes how to disable it permanently. Still, I did not want it to stop beeping during day time. The next steps and scripts are my solution to disable and enable the beeping during specific parts of the day (in my case between 00h and 09h).
 
-**Important:** DSM updates seem to remove the scripts under /root/ and rollback the upsd.users file to its original state. If you update DSM you have to repeat the process.
+**Important:** DSM updates seem to remove the scripts under /root/ and rollback the upsd.users file to its original state. To avoid repeating the process manually after every update, use the [automatic setup / restore](#automatic-setup--restore-survives-dsm-updates) below.
+
+## Automatic setup / restore (survives DSM updates)
+[restore.sh](restore.sh) is kept on a data volume (which DSM updates don't touch) and, when run as root, checks and re-creates only what is missing:
+* `/root/upscmd.py` (with your credentials) and `/root/ups_beeper_control.sh`
+* the upsd user in `upsd.users` (a `.bak` backup is made, then `ups-usb` is restarted)
+
+1. Clone/copy this repository to a shared folder, e.g. `/volume1/scripts/synology-nas-beeper-dsm7`.
+2. Create the config file and set `UPSD_USER` / `UPSD_PWD`:
+    ```shell
+    cd /volume1/scripts/synology-nas-beeper-dsm7
+    cp ups_beeper.conf.example ups_beeper.conf
+    vim ups_beeper.conf
+    chmod 600 ups_beeper.conf
+    ```
+3. In Control Panel -> Task Scheduler, create a **Triggered Task -> User-defined script**:
+    - user: root
+    - event: Boot-up
+    - command: `bash /volume1/scripts/synology-nas-beeper-dsm7/restore.sh curtime`
+
+    The optional argument (`enable`, `disable` or `curtime`) is passed to `ups_beeper_control.sh` after restoring (it waits up to 60 seconds for `upsd` to be ready). This replaces the boot task from step 8 below; the daily enable/disable tasks stay the same.
+4. Run the task once manually (or run the command with `sudo`) to do the initial setup.
+
+You can still follow the manual steps below instead.
 
 ## Intro
 In most Linux distros there is a set of tools to manage an UPS. Namely:
