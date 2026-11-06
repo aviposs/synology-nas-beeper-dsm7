@@ -163,6 +163,11 @@ sudo chmod 600 ups_beeper.conf
 
 Keep the folder and its parents writable only by trusted administrators, including shared-folder ACL permissions.
 
+Run `restore.sh` once after initial setup to configure the upsd user and load its permissions before testing or relying on the scheduled tasks:
+```shell
+sudo bash /volume1/scripts/ups-beeper/restore.sh curtime
+```
+
 At this point you can test the scripts:
 ```shell
 user@nas:/$ sudo bash /volume1/scripts/ups-beeper/ups_beeper_control.sh disable
@@ -195,13 +200,14 @@ Go to the DSM Web interface (Control panel -> Task scheduler) and add these two 
 1. Scheduled task to apply the beeper state based on the current time
     - user: root
     - schedule: every 15 minutes
-    - command: `bash /volume1/scripts/ups-beeper/restore.sh curtime`
+    - command: `bash /volume1/scripts/ups-beeper/ups_beeper_control.sh curtime`
     - send email when the script terminates abnormally
 2. Triggered task to apply the beeper state on boot based on the current time
     - user: root
+    - event: boot-up
     - command: `bash /volume1/scripts/ups-beeper/restore.sh curtime`
 
-The `curtime` argument lets the script choose the desired state from its time-based schedule. The 15-minute task keeps the beeper in sync, and the boot task applies the state promptly after startup. `restore.sh` also re-adds the upsd user after a DSM update if needed. This replaces the separate daily enable/disable tasks.
+The `curtime` argument lets the script choose the desired state from its time-based schedule. The 15-minute task calls `ups_beeper_control.sh` directly to keep the beeper in sync. The boot task calls `restore.sh` to re-add the upsd user if needed after a DSM update, then apply the state promptly after startup. This replaces the separate daily enable/disable tasks.
 
 ## Script checks
 Run `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v` from the repository folder. The tests use temporary configuration files and mocked DSM services / UPS communication; they do not access a real UPS or change system configuration.
