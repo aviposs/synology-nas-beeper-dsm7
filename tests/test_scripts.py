@@ -49,6 +49,7 @@ class ScriptTests(unittest.TestCase):
             PYTHONPATH=str(self.bin),
             TEST_STATE=str(self.state),
             TEST_LOG=str(self.log),
+            TEST_COMMANDS="beeper.disable beeper.enable beeper.mute beeper.off beeper.on load.off load.off.delay shutdown.stop",
         )
         self.command("id", 'echo "${TEST_UID:-0}"')
         self.command("sleep", ":")
@@ -71,8 +72,10 @@ class ScriptTests(unittest.TestCase):
             'class Telnet:\n'
             '    def __init__(self, host, port):\n'
             '        assert (host, port) == ("127.0.0.1", 3493)\n'
+            '        self.last_command = ""\n'
             '    def write(self, data):\n'
             '        text = data.decode("utf-8").strip()\n'
+            '        self.last_command = text\n'
             '        with open(os.environ["TEST_LOG"], "a") as log:\n'
             '            log.write(text + "\\n")\n'
             '        if text.startswith("INSTCMD ups "):\n'
@@ -80,12 +83,24 @@ class ScriptTests(unittest.TestCase):
             '            with open(path) as state:\n'
             '                old = state.read().strip()\n'
             '            cmd = text.split()[-1]\n'
+            '            if cmd not in os.environ["TEST_COMMANDS"].split():\n'
+            '                return\n'
             '            new = {"beeper.enable": "enabled", "beeper.disable": "disabled"}.get(cmd)\n'
             '            if cmd == "beeper.toggle":\n'
             '                new = "disabled" if old == "enabled" else "enabled"\n'
             '            with open(path, "w") as state:\n'
             '                state.write(new + "\\n")\n'
             '    def read_until(self, expected, timeout):\n'
+            '        if self.last_command == "LIST CMD ups":\n'
+            '            if os.environ.get("TEST_LIST_ERROR"):\n'
+            '                return b"ERR UNKNOWN-UPS\\n"\n'
+            '            if "TEST_LIST_RESPONSE" in os.environ:\n'
+            '                return os.environ["TEST_LIST_RESPONSE"].encode("utf-8")\n'
+            '            commands = os.environ["TEST_COMMANDS"].split()\n'
+            '            return ("BEGIN LIST CMD ups\\n" + "".join("CMD ups " + cmd + "\\n" for cmd in commands) + "END LIST CMD ups\\n").encode("utf-8")\n'
+            '        if self.last_command.startswith("INSTCMD ups "):\n'
+            '            if self.last_command.split()[-1] not in os.environ["TEST_COMMANDS"].split():\n'
+            '                return b"ERR CMD-NOT-SUPPORTED\\n"\n'
             '        return b"OK\\n"\n'
             '    def read_all(self):\n'
             '        return b"OK Goodbye\\n"\n'
@@ -178,7 +193,8 @@ class ScriptTests(unittest.TestCase):
     def test_controller_runs_from_unrelated_working_directory(self):
         self.run_script("ups_beeper_control.sh", "disable")
         self.assertEqual(self.state.read_text().strip(), "disabled")
-        self.assertIn("INSTCMD ups beeper.toggle", self.log.read_text())
+        self.assertIn("INSTCMD ups beeper.disable", self.log.read_text())
+        self.assertNotIn("INSTCMD ups beeper.toggle", self.log.read_text())
 
     def test_controller_does_not_toggle_matching_or_unknown_state(self):
         self.run_script("ups_beeper_control.sh", "enable")
@@ -186,6 +202,47 @@ class ScriptTests(unittest.TestCase):
         self.state.write_text("unknown\n")
         self.run_script("ups_beeper_control.sh", "disable", success=False)
         self.assertFalse(self.log.exists())
+
+    def test_controller_prefers_explicit_commands_when_toggle_is_also_supported(self):
+        self.env["TEST_COMMANDS"] = "beeper.enable beeper.disable beeper.toggle"
+        self.run_script("ups_beeper_control.sh", "disable")
+        self.run_script("ups_beeper_control.sh", "enable")
+        self.assertIn("INSTCMD ups beeper.disable", self.log.read_text())
+        self.assertIn("INSTCMD ups beeper.enable", self.log.read_text())
+        self.assertNotIn("INSTCMD ups beeper.toggle", self.log.read_text())
+        self.assertEqual(self.state.read_text().strip(), "enabled")
+
+    def test_controller_uses_toggle_when_explicit_command_is_unavailable(self):
+        self.env["TEST_COMMANDS"] = "beeper.toggle"
+        self.run_script("ups_beeper_control.sh", "disable")
+        self.run_script("ups_beeper_control.sh", "enable")
+        self.assertEqual(self.log.read_text().count("INSTCMD ups beeper.toggle"), 2)
+        self.assertEqual(self.state.read_text().strip(), "enabled")
+
+    def test_controller_reports_unsupported_commands_without_changing_state(self):
+        self.env["TEST_COMMANDS"] = "load.off shutdown.stop"
+        result = self.run_script("ups_beeper_control.sh", "disable", success=False)
+        self.assertIn("does not support beeper.disable or beeper.toggle", result.stdout)
+        self.assertNotIn("INSTCMD", self.log.read_text())
+        self.assertEqual(self.state.read_text().strip(), "enabled")
+
+    def test_controller_reports_command_listing_failure(self):
+        self.env["TEST_LIST_ERROR"] = "1"
+        result = self.run_script("ups_beeper_control.sh", "disable", success=False)
+        self.assertIn("ERR UNKNOWN-UPS", result.stdout + result.stderr)
+        self.assertNotIn("INSTCMD", self.log.read_text())
+        self.assertEqual(self.state.read_text().strip(), "enabled")
+
+    def test_controller_rejects_incomplete_or_malformed_command_lists(self):
+        for response in (
+            "BEGIN LIST CMD ups\nCMD ups beeper.disable\n",
+            "BEGIN LIST CMD ups\nbeeper.disable\nEND LIST CMD ups\n",
+        ):
+            with self.subTest(response=response):
+                self.env["TEST_LIST_RESPONSE"] = response
+                self.run_script("ups_beeper_control.sh", "disable", success=False)
+                self.assertNotIn("INSTCMD", self.log.read_text())
+                self.assertEqual(self.state.read_text().strip(), "enabled")
 
     def test_dsm6_uses_python_and_explicit_commands(self):
         self.version.write_text('majorversion="6"\n')
@@ -198,6 +255,9 @@ class ScriptTests(unittest.TestCase):
         self.state.write_text("disabled\n")
         self.run_script("restore.sh", "curtime")
         self.assertEqual(self.state.read_text().strip(), "enabled")
+        self.assertIn("INSTCMD ups beeper.enable", self.log.read_text())
+        self.run_script("restore.sh", "curtime")
+        self.assertEqual(self.log.read_text().count("INSTCMD"), 1)
 
     def test_missing_config_fails_for_both_shell_scripts(self):
         self.config.unlink()
@@ -222,6 +282,20 @@ class ScriptTests(unittest.TestCase):
         self.env.update(UPSD_USER="beeper", UPSD_PWD="test-password")
         self.run_script("upscmd.py", "beeper.disable")
         self.assertEqual(self.state.read_text().strip(), "disabled")
+
+    def test_upscmd_lists_commands_without_changing_state(self):
+        self.env.update(UPSD_USER="beeper", UPSD_PWD="test-password")
+        result = self.run_script("upscmd.py", "--list-commands")
+        self.assertEqual(result.stdout.splitlines(), self.env["TEST_COMMANDS"].split())
+        self.assertNotIn("INSTCMD", self.log.read_text())
+        self.assertEqual(self.state.read_text().strip(), "enabled")
+
+    def test_upscmd_reports_rejected_command_and_available_commands(self):
+        self.env.update(UPSD_USER="beeper", UPSD_PWD="test-password")
+        result = self.run_script("upscmd.py", "beeper.toggle", success=False)
+        self.assertIn("ERR CMD-NOT-SUPPORTED", result.stdout)
+        self.assertIn("- beeper.disable", result.stdout)
+        self.assertEqual(self.state.read_text().strip(), "enabled")
 
 
 if __name__ == "__main__":

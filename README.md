@@ -151,7 +151,7 @@ See [ups_beeper_control.sh](ups_beeper_control.sh).
 
 For `curtime`, the current schedule disables the beeper from 20:00 to 08:00 daily and continuously from Friday 16:00 to Sunday 08:00. Edit the time condition in `ups_beeper_control.sh` to use your preferred quiet hours.
 
-The script reads `majorversion` from `/etc.defaults/VERSION` (you can inspect it with `cat /etc.defaults/VERSION`). On DSM 6 and earlier it uses `beeper.enable` / `beeper.disable`. On DSM 7 and later it uses `beeper.toggle` only when `ups.beeper.status` differs from the requested state. An unknown state causes an error instead of toggling blindly. Your UPS driver must support the corresponding commands.
+The script reads `majorversion` from `/etc.defaults/VERSION` to select `python` on DSM 6 and earlier, or `python3` on DSM 7 and later. Beeper commands depend on the UPS driver, not the DSM version: the script queries the available commands and prefers `beeper.enable` / `beeper.disable`, falling back to `beeper.toggle` only if the requested explicit command is unavailable. It does nothing when `ups.beeper.status` already matches the requested state. An unknown state, failed command lookup, or unsupported command causes an error instead of toggling blindly.
 
 ### 7. Make the scripts executable
 ```shell

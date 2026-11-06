@@ -38,19 +38,29 @@ then
 	fi
 
 	python_cmd="python"
-	beeper_cmd="beeper.${goal}"
 	if [ "$dsm_major" -ge 7 ]
 	then
 		python_cmd="python3"
-		current_status=$(upsc ups ups.beeper.status) || exit 1
-		if [ "$current_status" == "${goal}d" ]
+	fi
+	current_status=$(upsc ups ups.beeper.status) || exit 1
+	if [ "$current_status" == "${goal}d" ]
+	then
+		echo "Beeper already ${goal}d."
+		exit 0
+	fi
+	if [ "$current_status" != "enabled" ] && [ "$current_status" != "disabled" ]
+	then
+		echo "Unknown / unsupported beeper status: $current_status"
+		exit 1
+	fi
+
+	available_cmds=$("$python_cmd" "$SCRIPT_DIR/upscmd.py" --list-commands) || exit 1
+	beeper_cmd="beeper.${goal}"
+	if ! grep -Fxq "$beeper_cmd" <<< "$available_cmds"
+	then
+		if ! grep -Fxq "beeper.toggle" <<< "$available_cmds"
 		then
-			echo "Beeper already ${goal}d."
-			exit 0
-		fi
-		if [ "$current_status" != "enabled" ] && [ "$current_status" != "disabled" ]
-		then
-			echo "Unknown / unsupported beeper status: $current_status"
+			echo "UPS does not support $beeper_cmd or beeper.toggle."
 			exit 1
 		fi
 		beeper_cmd="beeper.toggle"

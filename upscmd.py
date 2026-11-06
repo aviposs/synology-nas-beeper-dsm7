@@ -20,7 +20,30 @@ else:
     print("example: upscmd.py beeper.enable")
     exit(1)
 
+
+def list_commands(connection):
+    connection.write(b"LIST CMD ups\n")
+    response = connection.read_until(b"END LIST CMD ups\n", timeout=2).decode("utf-8")
+    lines = response.strip().splitlines()
+    if not lines or lines[0] != "BEGIN LIST CMD ups" or lines[-1] != "END LIST CMD ups":
+        raise ValueError("Unable to list UPS commands: {0}".format(response.strip()))
+    if any(not line.startswith("CMD ups ") for line in lines[1:-1]):
+        raise ValueError("Invalid UPS command list: {0}".format(response.strip()))
+    return [line[len("CMD ups "):] for line in lines[1:-1]]
+
+
 tn = telnetlib.Telnet("127.0.0.1", 3493)
+
+if cmd == "--list-commands":
+    try:
+        for available_cmd in list_commands(tn):
+            print(available_cmd)
+    except ValueError as error:
+        sys.stderr.write(str(error) + "\n")
+        sys.exit(1)
+    finally:
+        tn.close()
+    sys.exit(0)
 
 tn.write("USERNAME {0}\n".format(user).encode("utf-8"))
 response = tn.read_until(b"OK", timeout=2).decode("utf-8")
@@ -36,12 +59,13 @@ print("INSTCMD ups {0}: {1}".format(cmd, response.strip()))
 
 command_ok = response.strip() == "OK"
 if not command_ok:
-  tn.write(b"LIST CMD ups\n")
-  response = tn.read_until(b"END LIST CMD ups", timeout=2).decode("utf-8")
-  print("\n>> AVAILABLE CMDS:")
-  cmds = response.splitlines()[1:-1]
-  for cmd in cmds:
-    print(cmd.replace("CMD ups ", "- "))
+    try:
+        cmds = list_commands(tn)
+        print("\n>> AVAILABLE CMDS:")
+        for available_cmd in cmds:
+            print("- " + available_cmd)
+    except ValueError as error:
+        sys.stderr.write(str(error) + "\n")
 
 tn.write(b"LOGOUT\n")
 print(tn.read_all().decode("utf-8").rstrip("\n"))
