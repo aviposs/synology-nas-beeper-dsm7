@@ -191,18 +191,17 @@ Beeper enabled.
 ```
 
 ### 8. Schedule it
-Go to the DSM Web interface (Control panel -> Task scheduler) and add the 3 tasks:
-1. Scheduled task to enable beeper (daily)
+Go to the DSM Web interface (Control panel -> Task scheduler) and add these two tasks:
+1. Scheduled task to apply the beeper state based on the current time
     - user: root
-    - shedule: daily at 9am
-    - command: `bash /volume1/scripts/ups-beeper/ups_beeper_control.sh enable`
+    - schedule: every 15 minutes
+    - command: `bash /volume1/scripts/ups-beeper/restore.sh curtime`
     - send email when the script terminates abnormally
-2. Scheduled task to disable beeper (similar to above)
-    - command: `bash /volume1/scripts/ups-beeper/ups_beeper_control.sh disable`
-3. Triggered task to enable / disable on boot based on the current time
+2. Triggered task to apply the beeper state on boot based on the current time
+    - user: root
     - command: `bash /volume1/scripts/ups-beeper/restore.sh curtime`
 
-Use `restore.sh` for the boot task so the upsd user is re-added after a DSM update before applying the beeper state. The daily tasks can also use `restore.sh enable` / `restore.sh disable` to check the user entry on every run.
+The `curtime` argument lets the script choose the desired state from its time-based schedule. The 15-minute task keeps the beeper in sync, and the boot task applies the state promptly after startup. `restore.sh` also re-adds the upsd user after a DSM update if needed. This replaces the separate daily enable/disable tasks.
 
 ## Script checks
 Run `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v` from the repository folder. The tests use temporary configuration files and mocked DSM services / UPS communication; they do not access a real UPS or change system configuration.
