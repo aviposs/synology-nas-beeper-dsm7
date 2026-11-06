@@ -3,12 +3,13 @@
 if [ "$1" == "curtime" ]
 then
 	echo "Using current time to set UPS beeper status"
-	H=$(date "+%k")
-	if (( "$H" >= 9 )) 
+	read -r day hour minute < <(date "+%u %H %M")
+	time=$((10#$hour * 100 + 10#$minute))
+	if (( (day == 5 && time >= 1600) || (day == 6 && time < 2100) || time >= 2000 || time < 800 ))
 	then
-		goal="enable"
-	else
 		goal="disable"
+	else
+		goal="enable"
 	fi
 else
 	goal=$1
@@ -57,4 +58,3 @@ else
 	echo "Unknown / unsupported argument: $1"
 	exit 1
 fi
-
