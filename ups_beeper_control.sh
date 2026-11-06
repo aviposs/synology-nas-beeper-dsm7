@@ -1,5 +1,18 @@
 #!/bin/bash -e
 # https://moshib.in/2019/02/08/disable-ups-beeper-synology.html
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONF_FILE="$SCRIPT_DIR/ups_beeper.conf"
+if [ ! -f "$CONF_FILE" ]
+then
+	echo "Missing $CONF_FILE (copy ups_beeper.conf.example and edit it)."
+	exit 1
+fi
+# shellcheck source=/dev/null
+. "$CONF_FILE"
+export UPSD_USER UPSD_PWD
+
 if [ "$1" == "curtime" ]
 then
 	echo "Using current time to set UPS beeper status"
@@ -44,7 +57,7 @@ then
 	fi
 
 	echo "$goal beeper..."
-	"$python_cmd" /root/upscmd.py "$beeper_cmd" || exit 1
+	"$python_cmd" "$SCRIPT_DIR/upscmd.py" "$beeper_cmd" || exit 1
 	echo "Waiting 5 seconds for UPS to update state..."
 	sleep 5
 	if [[ "$(upsc ups ups.beeper.status)" == "${goal}d" ]]

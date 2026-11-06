@@ -5,35 +5,38 @@ Based on [this post](https://moshib.in/2019/02/08/disable-ups-beeper-synology.ht
 
 Some time ago the power went off at 4am for a long time and I had to get up and shutdown the UPS in order to stop the beeping. The abovementioned post describes how to disable it permanently. Still, I did not want it to stop beeping during day time. The next steps and scripts are my solution to disable and enable the beeping during specific parts of the day (in my case between 00h and 09h).
 
-**Important:** DSM updates seem to remove the scripts under /root/ and rollback the upsd.users file to its original state. To avoid repeating the process manually after every update, use the [automatic setup / restore](#automatic-setup--restore-survives-dsm-updates) below.
+**Important:** DSM updates seem to remove scripts under `/root/` and rollback the `upsd.users` file to its original state. Keep all scripts and their config on a data volume, e.g. `/volume1/scripts/ups-beeper`, and run them directly from there. Use the [automatic setup / restore](#automatic-setup--restore-survives-dsm-updates) below to restore the UPS user after updates; no scripts are copied to `/root`.
 
 ## Automatic setup / restore (survives DSM updates)
-[restore.sh](restore.sh) is kept on a data volume (which DSM updates don't touch) and, when run as root, checks and re-creates only what is missing:
-* `/root/upscmd.py` (with your credentials) and `/root/ups_beeper_control.sh`
-* the upsd user in `upsd.users` (a `.bak` backup is made, then `ups-usb` is restarted)
+[restore.sh](restore.sh) runs from the repository on a data volume (which DSM updates don't touch). When run as root, it adds the missing upsd user to `upsd.users` (a `.bak` backup is made, then `ups-usb` is restarted). It does not install or copy scripts elsewhere. The controller finds `upscmd.py` and `ups_beeper.conf` beside itself, regardless of the task's working directory.
 
-1. Clone/copy this repository to a shared folder, e.g. `/volume1/scripts/synology-nas-beeper-dsm7`.
+1. Clone/copy this repository to `/volume1/scripts/ups-beeper` (or another folder on a data volume).
 2. Create the config file and set `UPSD_USER` / `UPSD_PWD`:
     ```shell
-    cd /volume1/scripts/synology-nas-beeper-dsm7
+    cd /volume1/scripts/ups-beeper
     cp ups_beeper.conf.example ups_beeper.conf
     vim ups_beeper.conf
-    chmod 600 ups_beeper.conf
+    sudo chown root:root . restore.sh ups_beeper_control.sh upscmd.py ups_beeper.conf
+    sudo chmod 700 . restore.sh ups_beeper_control.sh upscmd.py
+    sudo chmod 600 ups_beeper.conf
     ```
+    Keep this folder and its parent folders writable only by trusted administrators, since the scheduled tasks run as root and source the config as shell code. Shared-folder ACLs must also prevent untrusted users from modifying them.
 3. In Control Panel -> Task Scheduler, create a **Scheduled Task -> User-defined script** task:
     - user: root
     - schedule it to run every 15 minutes
-    - command: `bash /volume1/scripts/synology-nas-beeper-dsm7/restore.sh curtime`
+    - command: `bash /volume1/scripts/ups-beeper/restore.sh curtime`
     - optionally send email when the script terminates abnormally
 4. Create a **Triggered Task -> User-defined script**:
     - user: root
     - event: Boot-up
-    - command: `bash /volume1/scripts/synology-nas-beeper-dsm7/restore.sh curtime`
+    - command: `bash /volume1/scripts/ups-beeper/restore.sh curtime`
 
-    The `curtime` argument makes the script choose the desired state from its time-based schedule. Running it every 15 minutes keeps the beeper in sync with that schedule; the boot task applies the state promptly after startup. The script restores missing setup files if needed, waits up to 60 seconds for `upsd` to be ready, and only restarts `ups-usb` if it had to add the upsd user. This replaces the three tasks from step 8 below.
+    The `curtime` argument makes the script choose the desired state from its time-based schedule. Running it every 15 minutes keeps the beeper in sync with that schedule; the boot task applies the state promptly after startup. The script restores the missing upsd user if needed, waits up to 60 seconds for `upsd` to be ready, and only restarts `ups-usb` if it had to add the user. This replaces the three tasks from step 8 below.
 5. Run the task once manually (or run the command with `sudo`) to do the initial setup.
 
 You can still follow the manual steps below instead.
+
+If migrating from the previous `/root` installation, update existing tasks to the volume paths above. `INSTALL_DIR` is no longer used and can be removed from your config. Once the volume-based tasks work, the old `/root/upscmd.py` and `/root/ups_beeper_control.sh` copies are no longer needed.
 
 ## Intro
 In most Linux distros there is a set of tools to manage an UPS. Namely:
@@ -130,33 +133,39 @@ On DSM 7 and later:
 sudo synosystemctl restart ups-usb
 ```
 
-### 5. Create a python script to issue commands
+### 5. Keep the scripts and credentials on the data volume
+Clone/copy this repository to `/volume1/scripts/ups-beeper`. Keep `restore.sh`, `ups_beeper_control.sh`, `upscmd.py`, and `ups_beeper.conf` together in that folder.
 ```shell
-sudo vim /root/upscmd.py
+cd /volume1/scripts/ups-beeper
+cp ups_beeper.conf.example ups_beeper.conf
+vim ups_beeper.conf
 ```
 
-Use the [upscmd.py](upscmd.py) file from this repository and configure `user` and `pwd`. It supports both Python 2 and Python 3. Ensure `python` is available on DSM 6 and earlier, or `python3` on DSM 7 and later.
+Set `UPSD_USER` and `UPSD_PWD` in `ups_beeper.conf` to match the user added in step 3. The controller loads this config and passes the credentials to [upscmd.py](upscmd.py) through environment variables; do not edit credentials into the Python script. It supports both Python 2 and Python 3. Ensure `python` is available on DSM 6 and earlier, or `python3` on DSM 7 and later.
 
-**Note**: You can just clone the repo to a folder in your NAS, edit the file to set the user/pwd and then copy this and the following `ups_beeper_control.sh` to the right place, e.g.:
-```shell
-sudo cp /volume<N>/<path_to_your_file>/upscmd.py /root/
-```
+No copying to `/root` is needed. All commands below use the data-volume path; adjust it if you use a different folder.
 
-### 6. Create a bash script to call the script
-Could be skipped or done in a single script. It is used to call the `upscmd.py` script with "beeper.enable" or "beeper.disable" depending on the time of the day since I want to re-set it not only on specific times (via cron) but also when the NAS boots.
+### 6. Configure the beeper schedule
+The controller calls the adjacent `upscmd.py` script depending on the requested state or time of day, so the state can be applied both at specific times and when the NAS boots.
 See [ups_beeper_control.sh](ups_beeper_control.sh).
+
+For `curtime`, the current schedule disables the beeper from 20:00 to 08:00 daily and continuously from Friday 16:00 to Sunday 08:00. Edit the time condition in `ups_beeper_control.sh` to use your preferred quiet hours.
 
 The script reads `majorversion` from `/etc.defaults/VERSION` (you can inspect it with `cat /etc.defaults/VERSION`). On DSM 6 and earlier it uses `beeper.enable` / `beeper.disable`. On DSM 7 and later it uses `beeper.toggle` only when `ups.beeper.status` differs from the requested state. An unknown state causes an error instead of toggling blindly. Your UPS driver must support the corresponding commands.
 
 ### 7. Make the scripts executable
 ```shell
-sudo chmod u+x upscmd.py
-sudo chmod u+x ups_beeper_control.sh
+cd /volume1/scripts/ups-beeper
+sudo chown root:root . restore.sh ups_beeper_control.sh upscmd.py ups_beeper.conf
+sudo chmod 700 . restore.sh ups_beeper_control.sh upscmd.py
+sudo chmod 600 ups_beeper.conf
 ```
+
+Keep the folder and its parents writable only by trusted administrators, including shared-folder ACL permissions.
 
 At this point you can test the scripts:
 ```shell
-user@nas:/$ sudo /root/ups_beeper_control.sh disable
+user@nas:/$ sudo bash /volume1/scripts/ups-beeper/ups_beeper_control.sh disable
 Password:
 disable beeper...
 USERNAME cmd status: OK
@@ -168,7 +177,7 @@ OK Goodbye
 Waiting 5 seconds for UPS to update state...
 Beeper disabled.
 
-user@nas:/$ sudo /root/ups_beeper_control.sh curtime
+user@nas:/$ sudo bash /volume1/scripts/ups-beeper/ups_beeper_control.sh curtime
 Using current time to set UPS beeper status
 enable beeper...
 USERNAME cmd status: OK
@@ -186,8 +195,14 @@ Go to the DSM Web interface (Control panel -> Task scheduler) and add the 3 task
 1. Scheduled task to enable beeper (daily)
     - user: root
     - shedule: daily at 9am
-    - command: `bash /root/ups_beeper_control.sh enable`
+    - command: `bash /volume1/scripts/ups-beeper/ups_beeper_control.sh enable`
     - send email when the script terminates abnormally
 2. Scheduled task to disable beeper (similar to above)
+    - command: `bash /volume1/scripts/ups-beeper/ups_beeper_control.sh disable`
 3. Triggered task to enable / disable on boot based on the current time
-    - command: `bash /root/ups_beeper_control.sh curtime`
+    - command: `bash /volume1/scripts/ups-beeper/restore.sh curtime`
+
+Use `restore.sh` for the boot task so the upsd user is re-added after a DSM update before applying the beeper state. The daily tasks can also use `restore.sh enable` / `restore.sh disable` to check the user entry on every run.
+
+## Script checks
+Run `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v` from the repository folder. The tests use temporary configuration files and mocked DSM services / UPS communication; they do not access a real UPS or change system configuration.

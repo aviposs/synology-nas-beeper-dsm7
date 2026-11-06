@@ -1,7 +1,4 @@
-# Copy this file to ups_beeper.conf (same folder as restore.sh) and set the values.
+# Copy this file to ups_beeper.conf (same folder as the scripts) and set the values.
 # Username/password must not contain whitespace, quotes, backslashes or brackets.
 UPSD_USER="<upsd_username>"
 UPSD_PWD="<upsd_pwd>"
-
-# Where the scripts are installed (default: /root)
-INSTALL_DIR="/root"

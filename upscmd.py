@@ -1,9 +1,17 @@
 #!/usr/bin/env python2
+import os
 import sys
 import telnetlib
 
-user = "<upsd_username>"
-pwd = "<upsd_pwd>"
+user = os.environ.get("UPSD_USER", "")
+pwd = os.environ.get("UPSD_PWD", "")
+
+if not user or not pwd or user.startswith("<") or pwd.startswith("<"):
+    print("UPSD_USER / UPSD_PWD are not configured (use ups_beeper_control.sh with ups_beeper.conf).")
+    sys.exit(1)
+if any(char.isspace() or char in "\"'\\[]" for char in user + pwd):
+    print("UPSD_USER / UPSD_PWD must not contain whitespace, quotes, backslashes or brackets.")
+    sys.exit(1)
 
 if len(sys.argv) == 2:
     cmd = sys.argv[1]
