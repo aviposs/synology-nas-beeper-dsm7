@@ -20,17 +20,17 @@ Some time ago the power went off at 4am for a long time and I had to get up and 
     vim ups_beeper.conf
     chmod 600 ups_beeper.conf
     ```
-3. In Control Panel -> Task Scheduler, create two **Scheduled Task -> User-defined script** tasks:
+3. In Control Panel -> Task Scheduler, create a **Scheduled Task -> User-defined script** task:
     - user: root
-    - schedule the first daily at 9am to enable the beeper; command: `bash /volume1/scripts/synology-nas-beeper-dsm7/restore.sh enable`
-    - schedule the second daily at midnight to disable the beeper; command: `bash /volume1/scripts/synology-nas-beeper-dsm7/restore.sh disable`
-    - optionally send email when a script terminates abnormally
+    - schedule it to run every 15 minutes
+    - command: `bash /volume1/scripts/synology-nas-beeper-dsm7/restore.sh curtime`
+    - optionally send email when the script terminates abnormally
 4. Create a **Triggered Task -> User-defined script**:
     - user: root
     - event: Boot-up
     - command: `bash /volume1/scripts/synology-nas-beeper-dsm7/restore.sh curtime`
 
-    The optional argument (`enable`, `disable` or `curtime`) is passed to `ups_beeper_control.sh` after restoring (it waits up to 60 seconds for `upsd` to be ready). This replaces the boot task from step 8 below.
+    The `curtime` argument makes the script choose the desired state from its time-based schedule. Running it every 15 minutes keeps the beeper in sync with that schedule; the boot task applies the state promptly after startup. The script restores missing setup files if needed, waits up to 60 seconds for `upsd` to be ready, and only restarts `ups-usb` if it had to add the upsd user. This replaces the three tasks from step 8 below.
 5. Run the task once manually (or run the command with `sudo`) to do the initial setup.
 
 You can still follow the manual steps below instead.
